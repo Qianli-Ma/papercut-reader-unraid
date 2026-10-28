@@ -88,3 +88,8 @@ Use **Docker → Check for Updates → Update** to install a newer tested image.
 The publisher checks upstream daily; it never updates a running NAS on its own.
 Existing library/cache volume mappings and reader-only settings stay in the Unraid
 template. A failed publisher workflow leaves the previous stable image available.
+
+To roll back, set Repository in Unraid's Edit screen to a previously tested
+`upstream-…-build-…` tag from the package's Versions list and apply it. Restore the
+`:stable` tag when ready to resume normal dashboard updates. Keep a library backup
+before any application update; image rollback alone does not reverse data changes.
