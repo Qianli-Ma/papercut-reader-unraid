@@ -1,0 +1,354 @@
+diff --git a/app/config.py b/app/config.py
+index e00fb49..7f446fe 100644
+--- a/app/config.py
++++ b/app/config.py
+@@ -14,4 +14,5 @@ PAPERS_DIR = LIBRARY / "papers"
+ ALMANAC_DB = Path(os.environ.get("PAPERCUT_ALMANAC_DB", ROOT.parent / "almanac" / "data" / "almanac.db")).resolve()
+ 
+ SCHEMA_VERSION = 1
+-CROP_DPI = 200
++CROP_DPI = int(os.environ.get("PAPERCUT_CROP_DPI", "300"))
++READER_ONLY = os.environ.get("PAPERCUT_READER_ONLY", "0") == "1"
+diff --git a/app/jobs.py b/app/jobs.py
+index 4788d81..53a8a02 100644
+--- a/app/jobs.py
++++ b/app/jobs.py
+@@ -25,6 +25,7 @@ import httpx
+ from . import ask, cards, catalog, insights, library, llm, summary
+ from .highlight import VERSION as highlight_version, classify_paper
+ from .parse import parse_paper
++from .config import READER_ONLY
+ 
+ _queue: "queue.Queue[tuple[str, str]]" = queue.Queue()
+ _status: dict[str, dict] = {}
+@@ -72,6 +73,10 @@ def side_key(paper_id: str, kind: str) -> str:
+ 
+ 
+ def submit(paper_id: str, kind: str = "full", force: bool = False) -> None:
++    if READER_ONLY and kind != "full":
++        _set(side_key(paper_id, kind) if kind in SIDE_KINDS else paper_id,
++             state="disabled", stage="Reader-only mode", progress=1.0)
++        return
+     if kind == "full" and not force and library.load_paper(paper_id):
+         return
+     key = side_key(paper_id, kind) if kind in SIDE_KINDS else paper_id
+@@ -211,12 +216,14 @@ def _worker() -> None:
+             _set(paper_id, state="running")
+             if kind == "full":
+                 old = library.load_paper(paper_id)
+-                paper = parse_paper(paper_id, lambda stage, frac: _set(paper_id, stage=stage, progress=frac * 0.3))
++                paper = parse_paper(paper_id, lambda stage, frac: _set(paper_id, stage=stage, progress=frac * (1.0 if READER_ONLY else 0.3)))
+                 if old:
+                     library.carry_over(old, paper)
+                 library.save_paper(paper_id, paper)
+                 # Only call the AI for papers it has never seen; "Re-run AI highlights" forces it.
+-                if not paper["status"]["classified"]:
++                if READER_ONLY:
++                    library.update_paper(paper_id, lambda p: p["status"].update(reader_only=True, error=None))
++                elif not paper["status"]["classified"]:
+                     _highlight(paper_id, paper, 0.3)
+             else:
+                 _highlight(paper_id, library.load_paper(paper_id), 0.0)
+@@ -242,6 +249,8 @@ def _resume() -> None:
+ 
+ def _backfill() -> None:
+     """Papers highlighted before summaries existed get one (once)."""
++    if READER_ONLY:
++        return
+     queued = {tuple(x) for x in _pending}
+     for pid in catalog.paper_ids():
+         p = library.load_paper(pid)
+diff --git a/app/llm.py b/app/llm.py
+index b040829..2b195d3 100644
+--- a/app/llm.py
++++ b/app/llm.py
+@@ -7,6 +7,12 @@ from typing import Iterator
+ import httpx
+ 
+ from . import library
++from .config import READER_ONLY
++
++
++def _require_ai():
++    if READER_ONLY:
++        raise RuntimeError("AI is disabled by PAPERCUT_READER_ONLY=1")
+ 
+ # Keep models loaded between requests: reloading after Ollama's default
+ # 5-minute idle unload has been seen to hang the first request.
+@@ -40,6 +46,8 @@ def model_name() -> str:
+ 
+ 
+ def status() -> dict:
++    if READER_ONLY:
++        return {"model": None, "ready": False, "reader_only": True, "message": "Reader-only mode"}
+     cfg = settings()
+     out = {"model": cfg["model"], "ready": False, "message": ""}
+     try:
+@@ -58,6 +66,7 @@ def chat(messages: list[dict], schema: dict | None = None, temperature: float =
+          think: bool = False) -> str:
+     """One reply. think=True lets the model reason first (slower; max_tokens
+     must leave room for the reasoning); only the final answer is returned."""
++    _require_ai()
+     cfg = settings()
+     body = {
+         "model": cfg["model"],
+@@ -85,6 +94,7 @@ def chat(messages: list[dict], schema: dict | None = None, temperature: float =
+ 
+ 
+ def embed(texts: list[str], model: str) -> list[list[float]]:
++    _require_ai()
+     r = httpx.post(f"{settings()['url']}/api/embed", json={"model": model, "input": texts, "keep_alive": KEEP_ALIVE}, timeout=300)
+     r.raise_for_status()
+     return r.json()["embeddings"]
+@@ -92,6 +102,7 @@ def embed(texts: list[str], model: str) -> list[list[float]]:
+ 
+ def stream_chat(messages: list[dict], temperature: float = 0.2, max_tokens: int = 1200) -> Iterator[str]:
+     """Yield the answer as it is generated."""
++    _require_ai()
+     cfg = settings()
+     body = {
+         "model": cfg["model"],
+@@ -119,6 +130,7 @@ def stream_turn(messages: list[dict], tools: list[dict], temperature: float = 0.
+     """One model turn with tools available. Yields ("token", text) as the
+     answer streams, and ("tool_calls", [{"name", "arguments"}]) if the model
+     asks to use tools instead (then the caller runs them and calls again)."""
++    _require_ai()
+     cfg = settings()
+     body = {
+         "model": cfg["model"],
+diff --git a/app/main.py b/app/main.py
+index 0b49eb4..9d12755 100644
+--- a/app/main.py
++++ b/app/main.py
+@@ -7,17 +7,18 @@ import re
+ import shutil
+ import tempfile
+ import time
++import threading
+ import uuid
+ from pathlib import Path
+ from urllib.parse import quote
+ 
+ import httpx
+ from fastapi import Body, FastAPI, HTTPException, UploadFile
+-from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
++from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
+ from fastapi.staticfiles import StaticFiles
+ 
+ from . import almanac, ask, cards, catalog, explain, export, fetch, jobs, library, llm, markdown, refs, translate
+-from .config import LIBRARY, WEB_DIR
++from .config import LIBRARY, WEB_DIR, READER_ONLY
+ from .highlight import CATEGORIES, VERSION as HIGHLIGHTER_VERSION
+ 
+ mimetypes.add_type("application/manifest+json", ".webmanifest")  # installable-app manifest
+@@ -25,6 +26,17 @@ mimetypes.add_type("application/manifest+json", ".webmanifest")  # installable-a
+ app = FastAPI(title="Papercut")
+ 
+ 
++@app.middleware("http")
++async def reader_only_guard(request, call_next):
++    path = request.url.path
++    if READER_ONLY and request.method == "POST" and (
++        re.search(r"/api/papers/[^/]+/(highlight|ask|explain|translate|explain-float|insights|summary|cards)$", path)
++        or path == "/api/library/organize"
++    ):
++        return JSONResponse({"detail": "AI is disabled in reader-only mode"}, status_code=409)
++    return await call_next(request)
++
++
+ class _QuietHealth(logging.Filter):
+     """The tray icon checks /api/health every 5 s; keep that out of the log."""
+ 
+@@ -550,7 +562,12 @@ def clear_chat(paper_id: str):
+ @app.get("/api/health")
+ def health():
+     """Cheap liveness check for the launch scripts (doesn't touch Ollama)."""
+-    return {"ok": True}
++    worker = any(t.name == "paper-worker" and t.is_alive() for t in threading.enumerate())
++    required = os.environ.get("PAPERCUT_WORKER", "1") != "0"
++    writable = os.access(LIBRARY, os.W_OK)
++    ok = writable and (worker or not required)
++    return JSONResponse({"ok": ok, "worker_alive": worker, "library_writable": writable,
++                         "reader_only": READER_ONLY}, status_code=200 if ok else 503)
+ 
+ 
+ @app.get("/api/ai")
+@@ -658,7 +675,7 @@ def put_settings(settings: dict = Body(...)):
+ 
+ @app.get("/api/info")
+ def info():
+-    return {"library": str(LIBRARY)}
++    return {"library": str(LIBRARY), "reader_only": READER_ONLY}
+ 
+ 
+ @app.middleware("http")
+@@ -682,6 +699,8 @@ def index():
+     when app.js or style.css changes, its URL changes, so no browser can keep
+     running an old copy."""
+     html = (WEB_DIR / "index.html").read_text("utf-8")
++    if READER_ONLY:
++        html = html.replace("<body>", '<body data-reader-only="1">')
+ 
+     def versioned(m):
+         path = WEB_DIR / m.group(2)
+diff --git a/app/parse.py b/app/parse.py
+index cd8fe16..392e9d4 100644
+--- a/app/parse.py
++++ b/app/parse.py
+@@ -28,7 +28,10 @@ def _get_converter():
+         from docling.datamodel.pipeline_options import PdfPipelineOptions
+         from docling.document_converter import DocumentConverter, PdfFormatOption
+ 
++        from docling.datamodel.accelerator_options import AcceleratorDevice, AcceleratorOptions
+         opts = PdfPipelineOptions()
++        opts.accelerator_options = AcceleratorOptions(
++            device=AcceleratorDevice.CPU, num_threads=int(os.environ.get("OMP_NUM_THREADS", "4")))
+         opts.do_ocr = False  # born-digital PDFs only
+         opts.do_table_structure = False  # tables are shown as image crops
+         _converter = DocumentConverter(format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=opts)})
+@@ -474,14 +477,17 @@ def parse_paper(paper_id: str, progress: Progress = lambda s, f: None) -> dict:
+             "caption": "caption",
+         }.get(label, "paragraph")
+         if region == "references":
+-            kind = "references"
++            # Appendix floats may share the final bibliography page, before
++            # its Appendix heading. Keep their captions out of the references.
++            kind = "caption" if _CAPTION_START.match(text) else "references"
+         pieces = _split_glued_captions(item, doc) if kind == "paragraph" else None
+         if pieces:
+             for piece, provs in pieces:
+                 raw.append({"type": kind, "text": piece, "provs": provs, "region": region,
+                             "_pos": (provs[0][0], *provs[0][1])})
+             continue
+-        emit({"type": kind, "text": text, "provs": _provs(item, doc), "region": region}, item)
++        emit({"type": kind, "text": text, "provs": _provs(item, doc),
++              "region": "appendix" if region == "references" and kind == "caption" else region}, item)
+ 
+     display = {}  # display equations' boxes: inline formulas stay out of them
+     for page_no, box in eq_box.values():
+@@ -963,13 +969,16 @@ def _tables_from_rules(raw: list[dict], pdf: fitz.Document, paper_id: str, n_flo
+     it (or just above, for a caption under its table), follow rules of the same
+     width until another caption or float intervenes, and crop that span as the
+     table. Text blocks inside it leave the reading flow."""
++    # Also preserve ruled code figures as original crops: reconstructing them
++    # from Docling text loses line breaks, indentation and syntax colours.
+     rules_cache: dict[int, list] = {}
+     made: dict[int, dict] = {}  # caption index -> new table block
+ 
+     for ci, c in enumerate(raw):
+         text = c.get("text", "")
+-        if c["type"] != "caption" or not c.get("_pos") or not (_caption_kind(text) == "table" or _LISTING.match(text)):
++        if c["type"] != "caption" or not c.get("_pos") or not (_caption_kind(text) in ("table", "figure") or _LISTING.match(text)):
+             continue
++        kind = "figure" if _caption_kind(text) == "figure" else "table"
+         p, cx0, cy0, cx1, cy1 = c["_pos"]
+         if any(0 <= j < len(raw) and raw[j]["type"] in ("figure", "table") and raw[j].get("_pos", (None,))[0] == p
+                for j in range(ci - 2, ci + 3)):
+@@ -998,6 +1007,8 @@ def _tables_from_rules(raw: list[dict], pdf: fitz.Document, paper_id: str, n_flo
+         above = [r for r in spans if cy0 - 45 <= r[0] <= cy0 + 1]
+         found = chain(below[0], +1) if below else (chain(above[-1], -1) if above else [])
+         if len(found) < 2:
++            if kind == "figure":
++                continue
+             # No closing rule on this page: a listing that runs on over the
+             # page break (DeepSeek-R1's Listings 2, 5, 6). Follow its monospace
+             # lines instead, across pages, and stack the pieces into one image.
+@@ -1011,10 +1022,19 @@ def _tables_from_rules(raw: list[dict], pdf: fitz.Document, paper_id: str, n_flo
+             continue
+         y0, y1 = min(r[0] for r in found), max(r[0] for r in found)
+         x0, x1 = min(r[1] for r in found), max(r[2] for r in found)
++        if kind == "figure" and not any(b["type"] == "code" and b.get("_pos", (None,))[0] == p
++                and _mostly_inside(b["_pos"][1:], (x0, y0, x1, y1)) for b in raw):
++            continue
++        if kind == "figure":
++            # Code line numbers can sit just outside the enclosing rules.
++            gutter = [w[0] for w in pdf[p - 1].get_text("words") if w[4].isdigit()
++                      and x0 - 12 <= w[0] < x0 and y0 <= w[1] and w[3] <= y1]
++            if gutter:
++                x0 = min(gutter) - 1
+         n_float += 1
+-        crop = _crop(pdf, paper_id, f"table-{n_float}", (p, (x0, y0 - 1, x1, y1 + 1)))
++        crop = _crop(pdf, paper_id, f"{kind}-{n_float}", (p, (x0, y0 - 1, x1, y1 + 1)))
+         if crop:
+-            made[ci] = {"type": "table", **crop, "_captions": [{"text": c["text"], "provs": c.get("provs", [])}],
++            made[ci] = {"type": kind, **crop, "_captions": [{"text": c["text"], "provs": c.get("provs", [])}],
+                         "region": c["region"], "_pos": (p, x0, y0, x1, y1)}
+ 
+     if not made:
+diff --git a/web/app.js b/web/app.js
+index ef079fd..b85776a 100644
+--- a/web/app.js
++++ b/web/app.js
+@@ -1,5 +1,6 @@
+ "use strict";
+ 
++const READER_ONLY = document.body.dataset.readerOnly === "1";
+ const $ = (id) => document.getElementById(id);
+ const views = ["home", "progress", "reader", "review", "qview", "sview"];
+ // The questions or summary page: a window of its own, apart from the reader.
+@@ -301,7 +302,7 @@ async function openPaper(id, sid) {
+   try {
+     paper = await loadPaperData(id);
+   } catch (e) {
+-    if (!String(e).startsWith("409") || !(await waitUntilProcessed(id))) return;
++    if (!String(e.message || e).startsWith("409") || !(await waitUntilProcessed(id))) return;
+     paper = await loadPaperData(id);
+   }
+   current = paper;
+@@ -725,7 +726,15 @@ function render(paper) {
+         const f = el("figure");
+         f.dataset.block = b.id;
+         const frame = el("span", "fig-frame"); // the button sits on the image's corner, not the column's
+-        frame.append(cropImg(paper, b), floatExplainButton(b));
++        const image = cropImg(paper, b);
++        const full = el("a", "full-size-crop");
++        full.href = image.src;
++        full.target = "_blank";
++        full.rel = "noopener";
++        full.title = "Open full-size image (zoom for small labels)";
++        full.setAttribute("aria-label", `Open full-size ${b.type}`);
++        full.append(image);
++        frame.append(full, floatExplainButton(b));
+         f.append(frame);
+         if (b.caption_sentences?.length) f.append(sentenceSpans(el("figcaption"), b.caption_sentences, paper));
+         into.append(f);
+@@ -852,6 +861,7 @@ function applyHighlights() {
+ 
+ function renderNotice() {
+   const n = $("notice");
++  if (READER_ONLY) { n.hidden = true; return; }
+   const st = current.status || {};
+   n.replaceChildren();
+   const outdated = st.classified && (st.highlight_version || 1) < (current.highlighter_version || 0);
+@@ -906,12 +916,12 @@ function openPicker(span, x, y, ulId) {
+     b.addEventListener("click", () => setEdit(sid, value));
+     picker.append(b);
+   };
+-  const ex = el("button", "picker-explain");
++  const ex = el("button", "picker-explain ai-feature");
+   ex.type = "button";
+   ex.setAttribute("role", "menuitem");
+   ex.append("Explain this sentence");
+   ex.addEventListener("click", () => explainSentence(span));
+-  const tr = el("button", "picker-explain");
++  const tr = el("button", "picker-explain ai-feature");
+   tr.type = "button";
+   tr.setAttribute("role", "menuitem");
+   tr.append("Translate this sentence");
+diff --git a/web/style.css b/web/style.css
+index cc5c06d..925f9cf 100644
+--- a/web/style.css
++++ b/web/style.css
+@@ -1070,3 +1070,12 @@ html::-webkit-scrollbar, body::-webkit-scrollbar { display: none; }
+   .find { left: calc(8px + env(safe-area-inset-left)); right: calc(8px + env(safe-area-inset-right)); }
+   .find input { flex: 1; width: auto; }
+ }
++
++/* Reader-only deployment: keep notes, manual highlights, figures and citations. */
++body[data-reader-only="1"] :is(#summary-toggle, #ask-toggle, #questions-toggle,
++#cards-toggle, #nav-review, #rehighlight, .col-org, .ai-feature, .float-explain,
++.hover-tools:not(.sel-tools), .sel-tools .translate-btn) { display: none !important; }
++body[data-reader-only="1"] #set-lang { display: none; }
++body[data-reader-only="1"] label:has(#set-lang) { display: none; }
++
++.paper .full-size-crop { display: inline-block; max-width: 100%; cursor: zoom-in; }

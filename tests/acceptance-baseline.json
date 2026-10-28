@@ -1,0 +1,162 @@
+{
+  "pdf_url": "https://wsp-lab.github.io/papers/lee-sp26.pdf",
+  "pdf_sha256": "764df2f84690f59806b00ffdb4cbe60b0e4aded71263fe63a1f5a860c8ceaef9",
+  "reference_entries": 73,
+  "assets": [
+    {
+      "page": 1,
+      "pixels": [
+        935,
+        905
+      ],
+      "sha256": "ec5795bf96d135d390082e94f3f198053ce587db0cbd771c3116cd5a90a3edbe",
+      "label": "figure 1",
+      "caption_sha256": "47b125c836d92f7a12bb48533ab0e8f5aa4b35d27bccb6f866bbd42b90397b74"
+    },
+    {
+      "page": 3,
+      "pixels": [
+        1035,
+        594
+      ],
+      "sha256": "2cd373d8b412634e93d22209c06a011483abc896948813c42a16afea8e649bb2",
+      "label": "table 1",
+      "caption_sha256": "58b9230dbc5802e2884b4df1def4937e5b75f9fcd173ee4594db5eb938218789"
+    },
+    {
+      "page": 4,
+      "pixels": [
+        1023,
+        831
+      ],
+      "sha256": "8134b6ab84ff9c7b9dc9d91df4f08583f4248aa523a73a94340f46dff8b53285",
+      "label": "figure 2",
+      "caption_sha256": "efb789d647c04ddac78dfb2a78f51cc23e39b67f387bb2f4bc24e28aabe450a4"
+    },
+    {
+      "page": 5,
+      "pixels": [
+        2110,
+        661
+      ],
+      "sha256": "f31363031b700ea2b5de0d51dba61c793853673ace88da19d4161ffbbb148f5d",
+      "label": "figure 3",
+      "caption_sha256": "1c184efecc65a94670260dc394325985bce26c4afa78de041264d2fd1769239d"
+    },
+    {
+      "page": 6,
+      "pixels": [
+        2123,
+        763
+      ],
+      "sha256": "2c92ce82dacb5a0e85adf31b0df1ff5f385c05c320eeb88d204b21d4a75e6892",
+      "label": "table 2",
+      "caption_sha256": "8ef382beb5f47aa60a645e3d5b29fa288e3586af9b17a33cda1e8c087089cf44"
+    },
+    {
+      "page": 8,
+      "pixels": [
+        1034,
+        521
+      ],
+      "sha256": "7b7846393f69a4590f21090a58c41185d33230e86c165ea07470136ee839111a",
+      "label": "figure 4",
+      "caption_sha256": "78ae28b6934006ff76355eb106af06b9bd3a056bcef53cfe9fef2eb0f8d2b3ca"
+    },
+    {
+      "page": 8,
+      "pixels": [
+        1016,
+        512
+      ],
+      "sha256": "ec2d9a2b107483d118adeb3a5f43ee43ebce0dcaca4f5d076cef198306d2f9fe",
+      "label": "figure 5",
+      "caption_sha256": "1034b303ff02d6d5cd0de099bda1a2964aa45c3353dc3c31d8d5c46486bd1360"
+    },
+    {
+      "page": 9,
+      "pixels": [
+        1063,
+        1307
+      ],
+      "sha256": "35c070dc9e22e369fcbdad78aa685ef2fb8572f3fd2b152d5afb862d21154945",
+      "label": "figure 6",
+      "caption_sha256": "4433d011f67c6a98a1b1694045a6f1528b33b686a77eca9b8c71ffa7d2db2c15"
+    },
+    {
+      "page": 10,
+      "pixels": [
+        1063,
+        2020
+      ],
+      "sha256": "14e92395f5a4e1d64da87a90f3ead29edfa059babcda2875054f62814fa8059e",
+      "label": "figure 7",
+      "caption_sha256": "3181eb9bc9bdca4c2df50a8e5255d8df2db5d7df69bb6818b20e6aed2180cd25"
+    },
+    {
+      "page": 11,
+      "pixels": [
+        1023,
+        544
+      ],
+      "sha256": "3feb63c008e4bb4f70b4f9fd724f208a39719ee54c1c94b80f732ed0a715204f",
+      "label": "figure 8",
+      "caption_sha256": "24cde1a3f344b898d884de97b13acc273bb219b1946457b3544eafa4b890db73"
+    },
+    {
+      "page": 12,
+      "pixels": [
+        1035,
+        265
+      ],
+      "sha256": "3e7fea66e20f99ac8603cfc1762e10b999bf730f9ada2053e3141501c20eef24",
+      "label": "table 3",
+      "caption_sha256": "f0e1f8fad5d19c537aaccfb4362807e49281ba39f8dba5f2014bac8b920f248d"
+    },
+    {
+      "page": 16,
+      "pixels": [
+        1030,
+        1720
+      ],
+      "sha256": "44ac4959066962efe30a2c6c9b72ace4cad61d47c81c6afffc46395485af248f",
+      "label": "table 4",
+      "caption_sha256": "f73f4bccfd77f630d23452e5bd4d4025618226ad02755bab60d084eca82aba32"
+    },
+    {
+      "page": 17,
+      "pixels": [
+        1030,
+        2085
+      ],
+      "sha256": "59f34d3306b616ff051b8668c812af7cc0ba171c57abde903fde86d4dfcefd35",
+      "label": "table 5",
+      "caption_sha256": "da54a277b8bd1e621cf5fae17e22cddf42e9c693423c53db8d84029ab0ef165b"
+    },
+    {
+      "page": 17,
+      "pixels": [
+        1030,
+        751
+      ],
+      "sha256": "e163b12265fce057048188e2eebbed5291177325a75ee5215db6f4f96d22f28e",
+      "label": "table 6",
+      "caption_sha256": "a03a49f858d70eef22653a1e23bc2ec21bb900503740f42201d026eae8ec9961"
+    },
+    {
+      "page": 18,
+      "pixels": [
+        1030,
+        938
+      ],
+      "sha256": "f0ab98fde66268739f3dc1d2e584ca70c596584bcb2252a3f899a1cb09889c54",
+      "label": "table 7",
+      "caption_sha256": "d1d3316ab97b7a4dc1aeb867d2d495103f2cc5a5bae7b0fdb71afb73cc9345e5"
+    }
+  ],
+  "reading_order_sha256": [
+    "bb2372f82bf57dc82681ff9b7b031df52934843059233e4ddc64c8eb43ef4e5d",
+    "3f51760e9f74dd793d1bb2c6cd3b7d83c98aa413e3ba948cc30acb67aa5569ed",
+    "110fb737149521fbb81128cb69a0ad451b5e66f6568e8cd9bdb04810356f358a"
+  ]
+}

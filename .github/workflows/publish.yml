@@ -1,0 +1,124 @@
+name: Test and publish Papercut reader
+
+"on":
+  push:
+    branches: [main]
+  schedule:
+    # Check upstream daily at 12:17 Asia/Shanghai. Publication never deploys to the NAS.
+    - cron: '17 4 * * *'
+  workflow_dispatch:
+    inputs:
+      upstream_ref:
+        description: Upstream branch, tag or exact commit to build
+        default: main
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: papercut-stable-publisher
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Check out publisher
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Prepare exact upstream source and apply guarded patch
+        id: source
+        env:
+          UPSTREAM_REF: ${{ inputs.upstream_ref || 'main' }}
+        run: |
+          bash scripts/prepare-source.sh "$UPSTREAM_REF"
+          printf 'upstream=%s\n' "$(cat .build/upstream-commit)" >> "$GITHUB_OUTPUT"
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          printf 'image=%s\n' "$image" >> "$GITHUB_OUTPUT"
+          cat deployment/python-base.env >> "$GITHUB_ENV"
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Log in to GHCR with repository-scoped workflow token
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Skip unchanged daily publication
+        id: plan
+        env:
+          IMAGE: ${{ steps.source.outputs.image }}
+          UPSTREAM_SHA: ${{ steps.source.outputs.upstream }}
+        run: |
+          required=true
+          if [[ "$GITHUB_EVENT_NAME" == schedule ]]; then
+            if docker buildx imagetools inspect "$IMAGE:stable" --format '{{json .Image}}' > .build/published-image.json; then
+              required=$(python3 - <<'PY'
+          import json,os
+          data=json.load(open('.build/published-image.json'))
+          labels=data.get('config',{}).get('Labels',{})
+          unchanged=(labels.get('io.papercut.upstream.revision')==os.environ['UPSTREAM_SHA']
+              and labels.get('io.papercut.publisher.revision')==os.environ['GITHUB_SHA'])
+          print('false' if unchanged else 'true')
+          PY
+              )
+            fi
+          fi
+          printf 'required=%s\n' "$required" >> "$GITHUB_OUTPUT"
+
+      - name: Build candidate without publishing it
+        if: steps.plan.outputs.required == 'true'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .build
+          file: .build/deployment/Dockerfile
+          platforms: linux/amd64
+          load: true
+          push: false
+          provenance: false
+          tags: ${{ steps.source.outputs.image }}:candidate
+          build-args: |
+            PYTHON_BASE=${{ env.PYTHON_BASE }}
+            UPSTREAM_COMMIT=${{ steps.source.outputs.upstream }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.url=https://github.com/OxO-106/Papercut
+            org.opencontainers.image.licenses=MIT
+            io.papercut.upstream.revision=${{ steps.source.outputs.upstream }}
+            io.papercut.publisher.revision=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Require unit, dependency, and real-paper fidelity checks
+        if: steps.plan.outputs.required == 'true'
+        env:
+          IMAGE: ${{ steps.source.outputs.image }}
+        run: bash scripts/test-image.sh "$IMAGE:candidate"
+
+      - name: Publish tested immutable version and stable tag
+        if: steps.plan.outputs.required == 'true'
+        env:
+          IMAGE: ${{ steps.source.outputs.image }}
+          UPSTREAM_SHA: ${{ steps.source.outputs.upstream }}
+        run: |
+          version="upstream-${UPSTREAM_SHA:0:12}-build-${GITHUB_SHA:0:12}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          docker tag "$IMAGE:candidate" "$IMAGE:$version"
+          docker push "$IMAGE:$version"
+          docker tag "$IMAGE:candidate" "$IMAGE:stable"
+          docker push "$IMAGE:stable"
+          {
+            printf 'Published `%s:stable` after all tests passed.\n\n' "$IMAGE"
+            printf 'Upstream: `%s`\n\n' "$UPSTREAM_SHA"
+            printf 'Rollback tag: `%s:%s`\n' "$IMAGE" "$version"
+          } >> "$GITHUB_STEP_SUMMARY"
