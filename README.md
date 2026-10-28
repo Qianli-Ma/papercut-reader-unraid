@@ -1,10 +1,12 @@
 # Papercut reader images for Unraid
 
+[![Image build](https://github.com/Qianli-Ma/papercut-reader-unraid/actions/workflows/publish.yml/badge.svg)](https://github.com/Qianli-Ma/papercut-reader-unraid/actions/workflows/publish.yml)
+
 A CPU-only Linux amd64 image publisher for
 [OxO-106/Papercut](https://github.com/OxO-106/Papercut), with a small reader-only
 and PDF-fidelity patch. Papercut remains under its upstream MIT license.
 
-The intended image is `ghcr.io/qianli-ma/papercut-reader-unraid:stable`.
+The published image is `ghcr.io/qianli-ma/papercut-reader-unraid:stable`.
 A normal Unraid Docker template can pull that tag, compare its registry digest,
 and install published updates using Check for Updates / Update.
 
@@ -78,3 +80,11 @@ upstream and publisher revisions match the current stable image.
 
 References: [GitHub's image publishing workflow](https://docs.github.com/en/actions/tutorials/publish-packages/publish-docker-images),
 [GHCR visibility and authentication](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry).
+
+## Routine Unraid updates
+
+Set the container Repository to `ghcr.io/qianli-ma/papercut-reader-unraid:stable`.
+Use **Docker → Check for Updates → Update** to install a newer tested image.
+The publisher checks upstream daily; it never updates a running NAS on its own.
+Existing library/cache volume mappings and reader-only settings stay in the Unraid
+template. A failed publisher workflow leaves the previous stable image available.
